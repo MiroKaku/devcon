@@ -1217,7 +1217,70 @@ final:
     return failcode;
 }
 
-int cmdInstall(_In_ LPCTSTR BaseName, _In_opt_ LPCTSTR Machine, _In_ DWORD Flags, _In_ int argc, _In_reads_(argc) PTSTR argv[])
+int cmdInstallLegacy(_In_ LPCTSTR /*BaseName*/, _In_opt_ LPCTSTR Machine, _In_ DWORD Flags, _In_ int argc, _In_reads_(argc) PTSTR argv[])
+/*++
+
+Routine Description:
+
+    CREATE
+    Creates a root enumerated devnode and installs drivers on it
+
+Arguments:
+
+    BaseName  - name of executable
+    Machine   - machine name, must be NULL
+    argc/argv - remaining parameters
+
+Return Value:
+
+    EXIT_xxxx
+
+--*/
+{
+    TCHAR InfPath[MAX_PATH]         = { 0 };
+    TCHAR CommandLine[MAX_PATH * 2] = { 0 };
+    LPCTSTR Mode = (Flags & DEVCON_FLAG_REBOOT) ? _T("131") : _T("128");
+    LPCTSTR inf  = NULL;
+
+    if (Machine) {
+        //
+        // must be local machine
+        //
+        return EXIT_USAGE;
+    }
+    if (argc < 2) {
+        //
+        // at least HWID required
+        //
+        return EXIT_USAGE;
+    }
+    inf = argv[0];
+    if (!inf[0]) {
+        return EXIT_USAGE;
+    }
+
+    //
+    // Inf must be a full pathname
+    //
+    if (GetFullPathName(inf, MAX_PATH, InfPath, NULL) >= MAX_PATH) {
+        //
+        // inf pathname too long
+        //
+        return EXIT_FAIL;
+    }
+
+    if (-1 == _stprintf_s(CommandLine, _countof(CommandLine), _T("DefaultInstall %s %s"), Mode, InfPath))
+    {
+        return EXIT_FAIL;
+    }
+
+    FormatToStream(stdout, MSG_INSTALL_UPDATE);
+
+    InstallHinfSection(NULL, NULL, CommandLine, NULL);
+    return EXIT_OK;
+}
+
+int cmdInstallKMDF(_In_ LPCTSTR BaseName, _In_opt_ LPCTSTR Machine, _In_ DWORD Flags, _In_ int argc, _In_reads_(argc) PTSTR argv[])
 /*++
 
 Routine Description:
@@ -1241,38 +1304,38 @@ Return Value:
     SP_DEVINFO_DATA DeviceInfoData;
     GUID ClassGUID;
     TCHAR ClassName[MAX_CLASS_NAME_LEN];
-    TCHAR hwIdList[LINE_LEN+4];
+    TCHAR hwIdList[LINE_LEN + 4];
     TCHAR InfPath[MAX_PATH];
     int failcode = EXIT_FAIL;
     LPCTSTR hwid = NULL;
     LPCTSTR inf = NULL;
 
-    if(Machine) {
+    if (Machine) {
         //
         // must be local machine
         //
         return EXIT_USAGE;
     }
-    if(argc<2) {
+    if (argc < 2) {
         //
         // at least HWID required
         //
         return EXIT_USAGE;
     }
     inf = argv[0];
-    if(!inf[0]) {
+    if (!inf[0]) {
         return EXIT_USAGE;
     }
 
     hwid = argv[1];
-    if(!hwid[0]) {
+    if (!hwid[0]) {
         return EXIT_USAGE;
     }
 
     //
     // Inf must be a full pathname
     //
-    if(GetFullPathName(inf,MAX_PATH,InfPath,NULL) >= MAX_PATH) {
+    if (GetFullPathName(inf, MAX_PATH, InfPath, NULL) >= MAX_PATH) {
         //
         // inf pathname too long
         //
@@ -1282,15 +1345,15 @@ Return Value:
     //
     // List of hardware ID's must be double zero-terminated
     //
-    ZeroMemory(hwIdList,sizeof(hwIdList));
-    if (FAILED(StringCchCopy(hwIdList,LINE_LEN,hwid))) {
+    ZeroMemory(hwIdList, sizeof(hwIdList));
+    if (FAILED(StringCchCopy(hwIdList, LINE_LEN, hwid))) {
         goto final;
     }
 
     //
     // Use the INF File to extract the Class GUID.
     //
-    if (!SetupDiGetINFClass(InfPath,&ClassGUID,ClassName,sizeof(ClassName)/sizeof(ClassName[0]),0))
+    if (!SetupDiGetINFClass(InfPath, &ClassGUID, ClassName, sizeof(ClassName) / sizeof(ClassName[0]), 0))
     {
         goto final;
     }
@@ -1298,8 +1361,8 @@ Return Value:
     //
     // Create the container for the to-be-created Device Information Element.
     //
-    DeviceInfoSet = SetupDiCreateDeviceInfoList(&ClassGUID,0);
-    if(DeviceInfoSet == INVALID_HANDLE_VALUE)
+    DeviceInfoSet = SetupDiCreateDeviceInfoList(&ClassGUID, 0);
+    if (DeviceInfoSet == INVALID_HANDLE_VALUE)
     {
         goto final;
     }
@@ -1323,11 +1386,11 @@ Return Value:
     //
     // Add the HardwareID to the Device's HardwareID property.
     //
-    if(!SetupDiSetDeviceRegistryProperty(DeviceInfoSet,
+    if (!SetupDiSetDeviceRegistryProperty(DeviceInfoSet,
         &DeviceInfoData,
         SPDRP_HARDWAREID,
         (LPBYTE)hwIdList,
-        ((DWORD)_tcslen(hwIdList)+1+1)*sizeof(TCHAR)))
+        ((DWORD)_tcslen(hwIdList) + 1 + 1) * sizeof(TCHAR)))
     {
         goto final;
     }
@@ -1343,19 +1406,220 @@ Return Value:
         goto final;
     }
 
-    FormatToStream(stdout,MSG_INSTALL_UPDATE);
+    FormatToStream(stdout, MSG_INSTALL_UPDATE);
     //
     // update the driver for the device we just created
     //
-    failcode = cmdUpdate(BaseName,Machine,Flags,argc,argv);
+    failcode = cmdUpdate(BaseName, Machine, Flags, argc, argv);
 
-final:
+    final:
 
     if (DeviceInfoSet != INVALID_HANDLE_VALUE) {
         SetupDiDestroyDeviceInfoList(DeviceInfoSet);
     }
 
     return failcode;
+}
+
+//
+// Function:  InstallSpecifiedComponent
+//
+// Purpose:   Install a network component from an INF file.
+//
+// Arguments:
+//    lpszInfFile [in]  INF file.
+//    lpszPnpID   [in]  PnpID of the network component to install.
+//    pguidClass  [in]  Class GUID of the network component.
+//
+// Returns:   None.
+//
+// Notes:
+//
+
+HRESULT InstallSpecifiedComponent(
+    _In_ LPCTSTR BaseName,
+    _In_ LPTSTR lpszInfFile,
+    _In_ LPTSTR lpszPnpID,
+    const GUID* pguidClass)
+{
+    INetCfg*    pnc;
+    LPTSTR      lpszApp;
+    HRESULT     hr;
+
+    hr = HrGetINetCfg(TRUE,
+        _T("devcon"),
+        &pnc,
+        &lpszApp);
+
+    if (hr == S_OK) {
+
+        //
+        // Install the network component.
+        //
+
+        hr = HrInstallNetComponent(pnc,
+            lpszPnpID,
+            pguidClass,
+            lpszInfFile);
+        if ((hr == S_OK) || (hr == NETCFG_S_REBOOT)) {
+
+            hr = pnc->Apply();
+
+            FormatToStream(stdout, MSG_INSTALL_UPDATE);
+        }
+        else {
+            if (hr != HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
+                Failure(BaseName, _T("Couldn't install the network component."));
+            }
+        }
+
+        HrReleaseINetCfg(pnc,
+            TRUE);
+    }
+    else {
+        if ((hr == NETCFG_E_NO_WRITE_LOCK) && lpszApp) {
+            Failure(BaseName, _T("Currently holds the lock, try later."));
+
+            CoTaskMemFree(lpszApp);
+        }
+        else {
+            Failure(BaseName, _T("Couldn't the get notify object interface."));
+        }
+    }
+
+    return hr;
+}
+
+int cmdInstallNDIS6(_In_ LPCTSTR BaseName, _In_opt_ LPCTSTR Machine, _In_ DWORD /*Flags*/, _In_ int argc, _In_reads_(argc) PTSTR argv[])
+/*++
+
+Routine Description:
+
+    CREATE
+    Creates a root enumerated devnode and installs drivers on it
+
+Arguments:
+
+    BaseName  - name of executable
+    Machine   - machine name, must be NULL
+    argc/argv - remaining parameters
+
+Return Value:
+
+    EXIT_xxxx
+
+--*/
+{
+    GUID ClassGUID;
+    TCHAR ClassName[MAX_CLASS_NAME_LEN];
+    TCHAR InfPath[MAX_PATH] = { 0 };
+    LPCTSTR inf = NULL;
+    LPCTSTR hwid = NULL;
+    HRESULT hr;
+
+    if (Machine) {
+        //
+        // must be local machine
+        //
+        return EXIT_USAGE;
+    }
+    if (argc < 2) {
+        //
+        // at least HWID required
+        //
+        return EXIT_USAGE;
+    }
+    inf = argv[0];
+    if (!inf[0]) {
+        return EXIT_USAGE;
+    }
+    hwid = argv[1];
+    if (!hwid[0]) {
+        return EXIT_USAGE;
+    }
+
+    //
+    // Inf must be a full pathname
+    //
+    if (GetFullPathName(inf, MAX_PATH, InfPath, NULL) >= MAX_PATH) {
+        //
+        // inf pathname too long
+        //
+        return EXIT_FAIL;
+    }
+
+    //
+    // Use the INF File to extract the Class GUID.
+    //
+    if (!SetupDiGetINFClass(InfPath, &ClassGUID, ClassName, sizeof(ClassName) / sizeof(ClassName[0]), 0))
+    {
+        return EXIT_FAIL;
+    }
+
+    hr = InstallSpecifiedComponent(BaseName, InfPath, (LPTSTR)hwid, &ClassGUID);
+    if (SUCCEEDED(hr))
+    {
+        FormatToStream(stdout, MSG_UPDATE_OK);
+    }
+
+    return (hr == NETCFG_S_REBOOT) ? EXIT_REBOOT : (SUCCEEDED(hr) ? EXIT_OK : EXIT_FAIL);
+}
+
+int cmdInstall(_In_ LPCTSTR BaseName, _In_opt_ LPCTSTR Machine, _In_ DWORD Flags, _In_ int argc, _In_reads_(argc) PTSTR argv[])
+/*++
+
+Routine Description:
+
+    CREATE
+    Creates a root enumerated devnode and installs drivers on it
+
+Arguments:
+
+    BaseName  - name of executable
+    Machine   - machine name, must be NULL
+    argc/argv - remaining parameters
+
+Return Value:
+
+    EXIT_xxxx
+
+--*/
+{
+    LPCTSTR mode = _T("KMDF");
+
+    if (Machine) {
+        //
+        // must be local machine
+        //
+        return EXIT_USAGE;
+    }
+    if (argc < 2) {
+        //
+        // at least HWID required
+        //
+        return EXIT_USAGE;
+    }
+    if (argc > 2)
+    {
+        mode = argv[0];
+        argc -= 1;
+        argv = &argv[1];
+    }
+
+    if (!_tcsicmp(_T("Legacy"), mode))
+    {
+        return cmdInstallLegacy(BaseName, Machine, Flags, argc, argv);
+    }
+    if (!_tcsicmp(_T("KMDF"), mode))
+    {
+        return cmdInstallKMDF(BaseName, Machine, Flags, argc, argv);
+    }
+    if (!_tcsicmp(_T("NDIS6"), mode))
+    {
+        return cmdInstallNDIS6(BaseName, Machine, Flags, argc, argv);
+    }
+
+    return EXIT_USAGE;
 }
 
 int cmdUpdateNI(_In_ LPCTSTR BaseName, _In_opt_ LPCTSTR Machine, _In_ DWORD Flags, _In_ int argc, _In_reads_(argc) PTSTR argv[])

@@ -594,7 +594,11 @@ Language=English
 Devcon Install Command
 Installs the specified device manually. Valid only on the local computer.
 (To reboot when necesary, Include -r .)
-%1 [-r] %2 <inf> <hwid>
+%1 [-r] %2 [mode] <inf> <hwid>
+[mode]       Specify INF file installation mode. The default is KMDF mode.
+-            Legacy     Legacy mode with the DefaultInstall section.
+-            KMDF       KMDF mode with Manufacturer and CoInstaller section.
+-            NDIS6      NDIS6 mode with Manufacturer section.
 <inf>        Specifies an INF file with installation information for the device.
 <hwid>       Specifies a hardware ID for the device.
 -r           Reboots the system only when a restart or reboot is required.

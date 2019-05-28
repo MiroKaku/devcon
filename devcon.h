@@ -28,6 +28,7 @@ Abstract:
 #include <io.h>
 #include <fcntl.h>
 
+#include "NetCfgAPI.h"
 #include "msg.h"
 #include "rc_ids.h"
 
@@ -61,8 +62,10 @@ extern DispatchEntry DispatchTable[];
 // Devcon.exe command line flags
 //
 #define DEVCON_FLAG_FORCE       0x00000001
+#define DEVCON_FLAG_REBOOT      0x00000002
 
 void FormatToStream(_In_ FILE * stream, _In_ DWORD fmt,...);
+void Failure(_In_ LPCTSTR BaseName, _In_ LPCTSTR Cmd);
 void Padding(_In_ int pad);
 bool SplitCommandLine(
     _In_ int & argc,

@@ -1099,6 +1099,7 @@ Return Value:
                 break;
             } else {
                 autoReboot = TRUE;
+                flags |= DEVCON_FLAG_REBOOT;
             }
         } else if((argv[firstArg][1]==TEXT('f')) || (argv[firstArg][1]==TEXT('F'))) {
             if((argv[firstArg][2]!=TEXT('\0')) ) {
